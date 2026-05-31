@@ -1,0 +1,11 @@
+{
+  "name": "zk-voting-circuits",
+  "version": "1.0.0",
+  "description": "ZK Circuits for Voting",
+  "dependencies": {
+    "circomlib": "^2.0.5"
+  },
+  "devDependencies": {
+    "snarkjs": "^0.7.2"
+  }
+}

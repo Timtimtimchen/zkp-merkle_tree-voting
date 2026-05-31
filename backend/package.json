@@ -1,0 +1,16 @@
+{
+  "name": "zk-voting-backend",
+  "version": "1.0.0",
+  "description": "Relayer Backend for ZK Voting",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "circomlibjs": "^0.1.7",
+    "cors": "^2.8.5",
+    "ethers": "^6.8.1",
+    "express": "^4.18.2",
+    "mysql2": "^3.6.3"
+  }
+}
