@@ -34,6 +34,21 @@ async function initDB() {
         value VARCHAR(255) NOT NULL
       );
     `);
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS candidates (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        name VARCHAR(255) NOT NULL
+      );
+    `);
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS settings (
+        setting_key VARCHAR(255) PRIMARY KEY,
+        setting_value VARCHAR(255) NOT NULL
+      );
+    `);
+    
+    // 初始化系統設定
+    await connection.query(`INSERT IGNORE INTO settings (setting_key, setting_value) VALUES ('is_voting_open', 'false'), ('hide_results', 'true');`);
     
     // 插入測試用的假學生證 UID (如果還沒有的話)
     await connection.query(`INSERT IGNORE INTO students (uid) VALUES ('E2345678'), ('A1111111'), ('B2222222');`);
@@ -45,6 +60,4 @@ async function initDB() {
   }
 }
 
-initDB();
-
-module.exports = pool;
+module.exports = { pool, initDB };

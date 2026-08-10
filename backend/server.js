@@ -2,7 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const { ethers } = require('ethers');
 const buildPoseidon = require('circomlibjs').buildPoseidon;
-const pool = require('./database');
+const { pool, initDB } = require('./database');
 
 const app = express();
 app.use(cors());
@@ -29,6 +29,7 @@ async function init() {
   
   // 載入資料庫中已存的 commitments
   try {
+    await initDB();
     const [rows] = await pool.query('SELECT value FROM commitments ORDER BY id ASC');
     for (const row of rows) {
       commitments.push(BigInt(row.value));
@@ -77,11 +78,26 @@ function calculateRoot(leaves) {
   return currentLevel[0];
 }
 
+// 取得系統設定
+async function getSettings() {
+  const [rows] = await pool.query('SELECT * FROM settings');
+  const settings = {};
+  for (const row of rows) {
+    settings[row.setting_key] = row.setting_value === 'true';
+  }
+  return settings;
+}
+
 // 階段一：註冊 (實名認證)
 app.post('/register', async (req, res) => {
   const { uid, commitment } = req.body;
 
   try {
+    const settings = await getSettings();
+    if (!settings.is_voting_open) {
+      return res.status(403).json({ error: "Voting is currently closed." });
+    }
+
     const [rows] = await pool.query('SELECT * FROM students WHERE uid = ?', [uid]);
     if (rows.length === 0) {
       return res.status(404).json({ error: "Student not found or unregistered." });
@@ -118,6 +134,11 @@ app.post('/vote', async (req, res) => {
   const { a, b, c, root, nullifierHash, candidate } = req.body;
   
   try {
+    const settings = await getSettings();
+    if (!settings.is_voting_open) {
+      return res.status(403).json({ error: "Voting is currently closed." });
+    }
+
     // [Relayer] 發送零知識投票交易
     const tx = await votingContract.vote(a, b, c, root, nullifierHash, candidate);
     await tx.wait();
@@ -133,23 +154,130 @@ app.post('/vote', async (req, res) => {
 // 階段三：查詢結果
 app.get('/results', async (req, res) => {
   try {
-    // 從區塊鏈智能合約讀取票數 (公開變數 votes 的 getter 方法)
-    // 我們使用 provider 而非 wallet 來呼叫，因為讀取不需手續費
     const readonlyContract = new ethers.Contract(CONTRACT_ADDRESS, [
       "function votes(uint256 candidate) view returns (uint256)"
     ], provider);
     
-    const votes1 = await readonlyContract.votes(1);
-    const votes2 = await readonlyContract.votes(2);
+    // 從資料庫取得所有候選人
+    const [candidates] = await pool.query('SELECT * FROM candidates ORDER BY id ASC');
+    
+    // 查詢每位候選人的得票數
+    const results = [];
+    const settings = await getSettings();
+    
+    for (const c of candidates) {
+      // 若隱藏結果，強制票數為 0
+      const voteCount = settings.hide_results ? 0n : await readonlyContract.votes(c.id);
+      results.push({
+        id: c.id,
+        name: c.name,
+        votes: Number(voteCount)
+      });
+    }
 
     res.json({
       success: true,
-      candidate1: Number(votes1),
-      candidate2: Number(votes2)
+      data: results
     });
   } catch (err) {
     console.error("Failed to fetch results from blockchain:", err);
     res.status(500).json({ error: "Failed to fetch results" });
+  }
+});
+
+// 後台：取得所有候選人
+app.get('/candidates', async (req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT * FROM candidates ORDER BY id ASC');
+    res.json({ success: true, data: rows });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch candidates" });
+  }
+});
+
+// 後台：新增候選人
+app.post('/candidates', async (req, res) => {
+  const { name } = req.body;
+  if (!name || name.trim() === '') return res.status(400).json({ error: "Name is required" });
+  
+  try {
+    const [result] = await pool.query('INSERT INTO candidates (name) VALUES (?)', [name.trim()]);
+    res.json({ success: true, id: result.insertId, name: name.trim() });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to add candidate" });
+  }
+});
+
+// 後台：刪除候選人
+app.delete('/candidates/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    await pool.query('DELETE FROM candidates WHERE id = ?', [id]);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to delete candidate" });
+  }
+});
+
+// 後台：取得系統設定
+app.get('/settings', async (req, res) => {
+  try {
+    const settings = await getSettings();
+    res.json({ success: true, data: settings });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch settings" });
+  }
+});
+
+// 後台：更新系統設定
+app.post('/settings', async (req, res) => {
+  const { is_voting_open, hide_results } = req.body;
+  try {
+    if (is_voting_open !== undefined) {
+      await pool.query('UPDATE settings SET setting_value = ? WHERE setting_key = "is_voting_open"', [is_voting_open ? 'true' : 'false']);
+    }
+    if (hide_results !== undefined) {
+      await pool.query('UPDATE settings SET setting_value = ? WHERE setting_key = "hide_results"', [hide_results ? 'true' : 'false']);
+    }
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to update settings" });
+  }
+});
+
+// 後台：取得白名單選民
+app.get('/students', async (req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT id, uid, has_voted FROM students ORDER BY id DESC');
+    res.json({ success: true, data: rows });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch students" });
+  }
+});
+
+// 後台：新增選民
+app.post('/students', async (req, res) => {
+  const { uid } = req.body;
+  if (!uid || uid.trim() === '') return res.status(400).json({ error: "UID is required" });
+  try {
+    await pool.query('INSERT INTO students (uid) VALUES (?)', [uid.trim()]);
+    res.json({ success: true });
+  } catch (err) {
+    if (err.code === 'ER_DUP_ENTRY') {
+      return res.status(400).json({ error: "Student UID already exists" });
+    }
+    res.status(500).json({ error: "Failed to add student" });
+  }
+});
+
+// 後台：刪除選民
+app.delete('/students/:uid', async (req, res) => {
+  const { uid } = req.params;
+  try {
+    await pool.query('DELETE FROM students WHERE uid = ?', [uid]);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to delete student" });
   }
 });
 

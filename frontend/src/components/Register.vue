@@ -29,6 +29,7 @@
 <script setup>
 import { ref } from 'vue'
 import { generateSecrets, calculateCommitment } from '../utils/zk'
+import { API_URL } from '../config'
 
 const uid = ref('')
 const loading = ref(false)
@@ -53,10 +54,13 @@ async function handleRegister() {
     const commitment = await calculateCommitment(secrets.nullifier, secrets.secret)
     
     // 3. 傳送至後端 Relayer
-    const res = await fetch('http://localhost:3000/register', {
+    const res = await fetch(`${API_URL}/register`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ uid: uid.value, commitment })
+      headers: { 
+        'Content-Type': 'application/json',
+        'ngrok-skip-browser-warning': 'true'
+      },
+      body: JSON.stringify({ uid: uid.value.trim(), commitment: commitment.toString() })
     })
     
     const data = await res.json()
