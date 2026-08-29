@@ -10,7 +10,7 @@ app.use(express.json());
 
 // 設定智能合約相關資訊 (請在部署後修改)
 const RPC_URL = "http://192.168.202.129:8545"; // 私有鏈 RPC
-const PRIVATE_KEY = "0xddb8c44214930d382ab43f3563173c22e2424a54038d938ad662add5274058ea"; // 您的真實私鑰
+const PRIVATE_KEY = ""; // 您的真實私鑰
 const CONTRACT_ADDRESS = "0x98Eb22D120Cb55b03eb5304712a388AbF63152E6"; // 部署後的 Voting 合約地址
 const VOTING_ABI = [
   "function updateRoot(uint256 _newRoot) external",
